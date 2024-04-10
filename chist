@@ -1,0 +1,92 @@
+#!/usr/bin/env python
+import sys
+import os
+import mysql.connector
+import re
+from icecream import ic; ic.configureOutput(includeContext=True)
+from mysql.connector.errors import DatabaseError
+from clipdb import HOST, USER, PASS, DB
+try:
+  from colors import color
+except Exception:
+  color = lambda t,*xs,**kw: t
+if not sys.stdout.isatty():
+  color = lambda x,*xs,**kw: x
+
+def eprint(*xs,**kw):
+  kw['file'] = sys.stderr
+  print(*xs,**kw)
+
+args = sys.argv[1:]
+if len(args) == 0:
+  eprint(f"{sys.argv[0]} <pattern> [<pattern>...]")
+  exit(1)
+  
+def getname(arg):
+  if ":" in arg:
+    namespace, name = arg.split(":",1)
+    if namespace == "":
+      namespace = os.getenv("CLIPNS","_")
+  else:
+    name = arg
+    namespace = os.getenv("CLIPNS","_")
+  return (namespace,name)
+
+try:
+  mydb = mysql.connector.connect(host=HOST,user=USER,password=PASS,database=DB)
+except DatabaseError as e:
+  eprint(f"DatabaseError(connect): {e}")
+  exit(1)
+
+sql = "select id, name, time from history;"
+sql1 = """SELECT clipid, name FROM pointers WHERE namespace = %s"""
+sql2 = """SELECT id, time FROM clips
+  WHERE (
+    namespace = %s AND
+    name = %s
+  )"""
+
+currents = {}
+cursor = mydb.cursor()
+error = False
+found = []
+ln = 0
+lns = 0
+n = 0
+for arg in args:
+  ignorecase = False
+  namespace, name = getname(arg)
+  if m := re.match(r"(/|@)(.*)\1(i)?",name):
+    ignorecase = m.group(2) == "i" 
+  if ignorecase:
+    r = re.compile(name,re.I)
+  else:
+    r = re.compile(name)
+
+  cursor.execute(sql1,(namespace,))
+  a = cursor.fetchall()
+  a = [ x for x in a if r.search(x[1]) ]
+  for x in a:
+    clipid,name = x
+    currents[name] = clipid
+    cursor.execute(sql2,(namespace,name)) 
+    a = cursor.fetchall()
+    if len(a) > 0:
+      ln = max(ln,len(name))
+      lns = max(lns,len(namespace))
+    for clipid,cliptime in a:
+      n = max(n,clipid)
+      found.append((clipid,namespace,name,cliptime))
+for clipid,namespace,name,cliptime in sorted(found,key=lambda t: t[-1]):
+  mn = ln-len(name)
+  mns = lns-len(namespace)
+  pn = " "*mn
+  pns = " "*mns
+  nn = len(str(n))
+  namec = color(name,fg="#ffff77")+pn
+  namespacec = color(namespace,fg="#ff7777")+pns
+  timec = color(cliptime,fg="#aaaacc")
+  line = f"{clipid: >{nn}}: {namespacec}:{namec} -- {timec}"
+  if clipid == currents[name]:
+    line += " *"
+  print(line)

@@ -1,0 +1,56 @@
+#!/usr/bin/env python
+import sys
+import os
+import mysql.connector
+from icecream import ic; ic.configureOutput(includeContext=True)
+from mysql.connector.errors import DatabaseError
+from clipdb import HOST, USER, PASS, DB
+
+args = sys.argv[1:]
+def eprint(*xs,**kw):
+  kw['file'] = sys.stderr
+  print(*xs,**kw)
+
+if len(args) == 0:
+  eprint(f"{sys.argv[0]} <name> [<name>...]")
+  exit(1)
+
+def getname(arg):
+  if ":" in arg:
+    namespace, name = arg.split(":",1)
+  else:
+    name = arg
+    namespace = os.getenv("CLIPNS","_")
+  return (namespace,name)
+  
+try:
+  mydb = mysql.connector.connect(host=HOST,user=USER,password=PASS,database=DB)
+except DatabaseError as e:
+  eprint(f"DatabaseError(connect): {e}",)
+  exit(1)
+
+sql = """SELECT pointers.clipid, clips.value, clips.time 
+  FROM pointers JOIN clips 
+  ON (pointers.clipid = clips.id) 
+  WHERE (
+    pointers.namespace = %s AND
+    pointers.name = %s
+  )"""
+
+cursor = mydb.cursor()
+error = False
+for arg in args:
+  namespace,name = getname(arg)
+  cursor.execute(sql,(namespace,name,))
+  a = cursor.fetchall()
+  if len(a) > 0:
+    clipid,value,cliptime = a[0]
+    value = value.replace("\r","")
+    if value[-1] != "\n":
+      print(value)
+    else:
+      print(value,end="")
+  else:
+    error = True
+
+exit(1 if error else 0)

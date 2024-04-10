@@ -1,0 +1,66 @@
+#!/usr/bin/env python
+
+"""
+list names in namespace matching regexes
+"""
+
+import sys
+import os
+import mysql.connector
+import re
+from icecream import ic; ic.configureOutput(includeContext=True)
+from mysql.connector.errors import DatabaseError
+from clipdb import HOST, USER, PASS, DB
+try:
+  from colors import color
+except Exception:
+  color = lambda t,*xs,**kw: t
+if not sys.stdout.isatty():
+  color = lambda x,*xs,**kw: x
+
+def eprint(*xs,**kw):
+  kw['file'] = sys.stderr
+  print(*xs,**kw)
+
+args = sys.argv[1:]
+if len(args) == 0:
+  eprint(f"{sys.argv[0]} <pattern> [<pattern>...]")
+  exit(1)
+  
+
+try:
+  mydb = mysql.connector.connect(host=HOST,user=USER,password=PASS,database=DB)
+except DatabaseError as e:
+  eprint(f"DatabaseError(connect): {e}")
+  exit(1)
+
+sql = "SELECT DISTINCT namespace FROM pointers";
+
+cursor = mydb.cursor()
+error = False
+found = set()
+ln = 0
+lns = 0
+maxn = 0
+n = 0
+namespaces = set()
+cursor.execute(sql)
+a = cursor.fetchall()
+for arg in args:
+  ignorecase = False
+  if m := re.match(r"(/|@)(.*)\1(i?)$",arg):
+    ignorecase = m.group(3) == "i" 
+    arg = m.group(2)
+  if ignorecase:
+    r = re.compile(arg,re.I)
+  else:
+    r = re.compile(arg)
+
+  for x in a:
+    if r.search(x[0]):
+      found.add(x[0])
+
+if len(found) == 0:
+  eprint(f"Not found")
+  exit(1)
+print("\n".join(sorted(found)))

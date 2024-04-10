@@ -1,0 +1,99 @@
+#!/usr/bin/env python
+
+"""
+list names in namespace matching regexes
+"""
+
+import sys
+import os
+import mysql.connector
+import re
+from icecream import ic; ic.configureOutput(includeContext=True)
+from mysql.connector.errors import DatabaseError
+from clipdb import HOST, USER, PASS, DB
+try:
+  from colors import color
+except Exception:
+  color = lambda t,*xs,**kw: t
+if not sys.stdout.isatty():
+  color = lambda x,*xs,**kw: x
+
+def eprint(*xs,**kw):
+  kw['file'] = sys.stderr
+  print(*xs,**kw)
+
+args = sys.argv[1:]
+if len(args) == 0:
+  eprint(f"{sys.argv[0]} <pattern> [<pattern>...]")
+  exit(1)
+  
+def getname(arg):
+  if ":" in arg:
+    namespace, name = arg.split(":",1)
+    if namespace == "":
+      namespace = os.getenv("CLIPNS","_")
+  else:
+    name = arg
+    namespace = os.getenv("CLIPNS","_")
+  return (namespace,name)
+
+try:
+  mydb = mysql.connector.connect(host=HOST,user=USER,password=PASS,database=DB)
+except DatabaseError as e:
+  eprint(f"DatabaseError(connect): {e}")
+  exit(1)
+
+sql = "select id, name, time from history;"
+sql1 = """SELECT id,name FROM pointers WHERE namespace = %s"""
+sql2 = """SELECT id, time FROM clips
+  WHERE (
+    namespace = %s AND
+    name = %s
+  )"""
+sql_getcount = """SELECT count(*) FROM clips
+  WHERE (
+    namespace = %s AND
+    name = %s
+  )"""
+
+cursor = mydb.cursor()
+error = False
+found = []
+ln = 0
+lns = 0
+maxn = 0
+n = 0
+namespaces = set()
+for arg in args:
+  ignorecase = False
+  namespace, name = getname(arg)
+  if m := re.match(r"(/|@)(.*)\1(i?)",name):
+    ignorecase = m.group(3) == "i" 
+    name = m.group(2)
+  if ignorecase:
+    r = re.compile(name,re.I)
+  else:
+    r = re.compile(name)
+
+  cursor.execute(sql1,(namespace,))
+  a = cursor.fetchall()
+  a = [ x for x in a if r.search(x[1]) ]
+  if len(a) > 0:
+    namespaces.add(namespace)
+    lns = max(lns,len(namespace))
+  for x in a:
+    clipid, name = x
+    b = cursor.execute(sql_getcount,(namespace,name))
+    clipcount = cursor.fetchall()[0][0]
+    found.append((clipid,namespace,name,clipcount))
+    ln = max(ln,len(x[1]))
+    maxn = max(maxn,x[0])
+for clipid,namespace,name,clipcount in sorted(found,key=lambda t: f"{namespace}:{name}"):
+  nn = len(str(maxn))
+  mn = ln-len(name)
+  mns = lns-len(namespace)
+  pn = " "*mn
+  pns = " "*mns
+  namec = color(name,fg="#ffff77")+pn
+  namespacec = pns+color(namespace,fg="#ff7777")
+  print(f"{clipid: >{nn}} {namespacec}:{namec} ({clipcount})")

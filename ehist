@@ -1,0 +1,56 @@
+#!/usr/bin/env python
+import sys
+import os
+import requests
+import bouncer
+import json
+from icecream import ic
+
+url = "http://hexvision.mrflbble.com/path/to/backend.php"
+
+def eprint(*xs,**kw):
+  kw['file'] = sys.stderr
+  print(*xs,**kw)
+
+args = sys.argv[1:]
+if len(args) == 0:
+  eprint(f"{sys.argv[0]} <name> [<name>...]")
+  exit(1)
+
+def getname(arg):
+  if ":" in arg:
+    namespace, name = arg.split(":",1)
+  else:
+    name = arg
+    namespace = os.getenv("CLIPNS","_")
+  return (namespace,name)
+
+cookies = { bouncer.cookiename: bouncer.cookievalue }
+
+for arg in args:
+  namespace, name = getname(arg)
+  req = { "namespace": namespace, "name": name }
+  j = json.dumps(req)
+
+  r = requests.post(url,data=j,cookies=cookies)
+  if r.status_code == 200:
+    try:
+      b = json.loads(r.text)
+      clips = b["clips"]
+      currents = b["currents"]
+      for clip in clips:
+        clipid, namespace, name, when = clip
+        namens = f"{namespace}:{name}"
+        current = currents[namens]
+        current_star = " *" if current == clipid else ""
+        print(f"{clipid} {namespace}:{name} {when}{current_star}")
+    except Exception as e:
+      eprint("error",r,r.text,e)
+      exit(1)
+  if r.status_code == 404:
+    eprint(f"{namespace}:{name} not found",file=sys.stderr)
+    exit(1)
+  if r.status_code == 403:
+    eprint(f"Access denied",file=sys.stderr)
+    exit(1)
+    
